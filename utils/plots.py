@@ -84,20 +84,55 @@ class Annotator:
         self.lw = line_width or max(round(sum(im.shape) / 2 * 0.003), 2)  # line width
 
     def box_label(self, box, label='', box_wh=None, metadata=None, color=(128, 128, 128), txt_color=(255, 255, 255), on_box=True, on_txt=True):
+    # def box_label(self, box, metadata=None, label="", color=(128, 128, 128), txt_color=(255, 255, 255)): # PIL
         # Add one xyxy box to image with label
-        if self.pil or not is_ascii(label):
+        if self.pil or not is_ascii(label): 
+            # Convert Tensor to Integer type
+            box = [int(item.item()) for item in box] 
+            max_width, max_height = self.im.size # image width, height (640, 360)
+            # Cyglidar Center check
+            lidar_w, lidar_h = 160, 60
+            x = max_width // 2 - lidar_w // 2
+            y = max_height // 2 - lidar_h // 2
+            self.draw.rectangle([(x, y), (x + lidar_w, y + lidar_h)], width=self.lw+3, outline=(0, 0, 255)) # center box
+            
             self.draw.rectangle(box, width=self.lw, outline=color)  # box
             if label:
-                w, h = self.font.getsize(label)  # text width, height (WARNING: deprecated) in 9.2.0
-                # _, _, w, h = self.font.getbbox(label)  # text width, height (New)
-                outside = box[1] - h >= 0  # label fits outside box
-                self.draw.rectangle(
-                    (box[0], box[1] - h if outside else box[1], box[0] + w + 1,
-                     box[1] + 1 if outside else box[1] + h + 1),
-                    fill=color,
-                )
-                # self.draw.text((box[0], box[1]), label, fill=txt_color, font=self.font, anchor='ls')  # for PIL>8.0
-                self.draw.text((box[0], box[1] - h if outside else box[1]), label, fill=txt_color, font=self.font)
+                border_width = self.lw
+                offset = border_width + 3
+                multi_text = "\n".join(metadata)
+                text_width, text_height = self.draw.multiline_textsize(multi_text, font=self.font)
+
+                y = box[1] # label fits box
+                if box[0] + box[2] + text_width > max_width:
+                    if box[1] + text_height > max_height:
+                        position = (box[0] - text_width - offset, max_height - text_height - 7)
+                    else:
+                        position = (box[0] - text_width - offset, y)
+                    align = "right"
+                else:
+                    if box[1] + text_height > max_height:
+                        position = (box[2] + offset, max_height - text_height - 7)
+                    else:
+                        position = (box[2] + offset, y)
+                    align = "left"
+
+                for i in range(3):
+                    self.draw.multiline_text(
+                        (position[0] - i - 1, position[1]),
+                        multi_text,
+                        font=self.font,
+                        align=align,
+                        fill=(255, 255, 255),)
+                for i in range(3):
+                    self.draw.multiline_text(
+                        (position[0], position[1] - i - 1),
+                        multi_text,
+                        font=self.font,
+                        align=align,
+                        fill=(255, 255, 255),)
+                self.draw.multiline_text(position, multi_text, font=self.font, align=align, fill=txt_color)
+
         else:  # cv2
             sz = self.im.shape  # ex.(360, 640, 3) imgsz
             p1, p2 = (int(box[0]), int(box[1])), (int(box[2]), int(box[3]))
