@@ -136,6 +136,10 @@ def run(
 
         # Process predictions
         for i, det in enumerate(pred):  # per image
+            query = "SELECT item, status FROM robot_iot.operation WHERE item = 'text' OR item = 'bounding_box' ORDER BY item;"
+            cur.execute(query)
+            toggle = cur.fetchall()
+
             seen += 1
             if webcam:  # batch_size >= 1
                 p, im0, frame = path[i], im0s[i].copy(), dataset.count
@@ -177,7 +181,13 @@ def run(
                             f"class: {label}",
                             f"distance: 00.0"
                             ]
-                        annotator.box_label(xyxy, label, box_wh, metadata, color=colors(c, True))
+                        
+                        if toggle[0][1] == False: # bbox
+                            annotator.box_label(xyxy, label, box_wh, metadata, color=colors(c, True), on_box=False, on_txt=False)
+                        elif toggle[1][1] == False: # text
+                            annotator.box_label(xyxy, label, box_wh, metadata, color=colors(c, True), on_txt=False)
+                        else:
+                            annotator.box_label(xyxy, label, box_wh, metadata, color=colors(c, True))
 
                     if save_crop:
                         save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
@@ -253,6 +263,7 @@ def parse_opt():
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
     parser.add_argument('--vid-stride', type=int, default=1, help='video frame-rate stride')
+    parser.add_argument("--database", action="store_true") # stop insert
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
     print_args(vars(opt))
