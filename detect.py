@@ -52,7 +52,10 @@ from utils.torch_utils import select_device, smart_inference_mode
 import time
 import psycopg2
 import itertools
+import json
+import requests
 import numpy as np
+
 
 def connect_to_database(db_inform):
     global conn, cur
@@ -62,6 +65,7 @@ def connect_to_database(db_inform):
     except (psycopg2.OperationalError, psycopg2.DatabaseError) as error:
         print(f"Error connecting to the database: {error}")
         print(f"Database Unconnected")
+
 
 def insert_data_to_database(frame, lines, dist_rand, node_id="test"):
     name, id, box, box_list = [], [], [], []
@@ -82,7 +86,16 @@ def insert_data_to_database(frame, lines, dist_rand, node_id="test"):
         VALUES ('{node_id}', %s, %s, '{eqp_time}', ARRAY {box_list}, '{dist_rand}')"
     cur.execute(query, (id, name))
     conn.commit()
+
+    to_cloud = [{"node_id": node_id, "id": id, "class_name": name, "eqp_time": eqp_time,"bbox": box_list}]
+    response = requests.post(
+        url="http://000.000.0.000:0000/test-api/cloud", 
+        headers={"Content-Type": "application/json"}, 
+        data=json.dumps(to_cloud)
+        )
+    print(response)
     return True
+
 
 @smart_inference_mode()
 def run(
