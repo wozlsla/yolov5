@@ -49,6 +49,40 @@ from utils.general import (LOGGER, Profile, check_file, check_img_size, check_im
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, smart_inference_mode
 
+import time
+import psycopg2
+import itertools
+import numpy as np
+
+def connect_to_database(db_inform):
+    global conn, cur
+    try:
+        conn = psycopg2.connect(**db_inform)
+        cur = conn.cursor()
+    except (psycopg2.OperationalError, psycopg2.DatabaseError) as error:
+        print(f"Error connecting to the database: {error}")
+        print(f"Database Unconnected")
+
+def insert_data_to_database(frame, lines, dist_rand, node_id="test"):
+    name, id, box, box_list = [], [], [], []
+    for line in lines:
+        name.append(line[0])
+        id.append(line[1])
+        box.append(line[2])
+
+    boxes = list(itertools.chain(*box))
+    step_size = 4
+    for i in range(0, len(boxes), step_size):
+        box_float = boxes[i : i + step_size]
+        box_str = ", ".join(map(str, box_float))
+        box_list.append(box_str)
+
+    eqp_time = time.strftime("%Y-%m-%d %H:%M:%S.%03d", time.localtime(time.time()))
+    query = f"INSERT INTO robot_iot.test (node_id, id, class_name, eqp_time, bbox, distance) \
+        VALUES ('{node_id}', %s, %s, '{eqp_time}', ARRAY {box_list}, '{dist_rand}')"
+    cur.execute(query, (id, name))
+    conn.commit()
+    return True
 
 @smart_inference_mode()
 def run(
@@ -79,6 +113,7 @@ def run(
         half=False,  # use FP16 half-precision inference
         dnn=False,  # use OpenCV DNN for ONNX inference
         vid_stride=1,  # video frame-rate stride
+        database=True,  # use database
 ):
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
@@ -154,6 +189,7 @@ def run(
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             imc = im0.copy() if save_crop else im0  # for save_crop
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))
+            lines = []
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], im0.shape).round()
@@ -173,13 +209,18 @@ def run(
 
                         bbox = list(line[1:])
                         box_wh = (bbox[2], bbox[3])
+                        bbox = [round(x, 4) for x in xywh]
 
                     if save_img or save_crop or view_img:  # Add bbox to image
                         c = int(cls)  # integer class
                         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
+                        label = names[c]
+                        dist_rand = np.random.randint(30, 500)
+                        lines.append([label, c, bbox, dist_rand])
+
                         metadata = [
                             f"class: {label}",
-                            f"distance: 00.0"
+                            f"distance: {dist_rand}"
                             ]
                         
                         if toggle[0][1] == False: # bbox
@@ -219,10 +260,23 @@ def run(
                             fps, w, h = 30, im0.shape[1], im0.shape[0]
                         save_path = str(Path(save_path).with_suffix('.mp4'))  # force *.mp4 suffix on results videos
                         vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
-                    vid_writer[i].write(im0)
+                    # vid_writer[i].write(im0)
+                    cv2.imwrite(save_path, im0)
 
         # Print time (inference-only)
         LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{dt[1].dt * 1E3:.1f}ms")
+
+        # Database
+        status = 0 # test
+        try:
+            if status != 0:
+                insert_data_to_database(frame, lines, dist_rand)
+        except (Exception, KeyboardInterrupt) as e:
+            if database:
+                cur.close()
+                conn.close()
+                print("Database connection is closed")
+            print("Error:", e)
 
     # Print results
     t = tuple(x.t / seen * 1E3 for x in dt)  # speeds per image
@@ -266,6 +320,8 @@ def parse_opt():
     parser.add_argument("--database", action="store_true") # stop insert
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
+    if opt.database:
+        connect_to_database(db_inform)
     print_args(vars(opt))
     return opt
 
@@ -278,3 +334,4 @@ def main(opt):
 if __name__ == '__main__':
     opt = parse_opt()
     main(opt)
+    db_inform = {}
