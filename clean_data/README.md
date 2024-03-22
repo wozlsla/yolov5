@@ -9,12 +9,12 @@ https://velog.io/@moey920/AI-%ED%97%88%EB%B8%8C-%EB%8D%B0%EC%9D%B4%ED%84%B0-%EC%
 - cls_distribution.py  
   Class sampling (Class Imbalance)
 - pair_check_image.sh / pair_check.sh  
-  Check pair files (img, ann)  
-<br/>
-- cls_convert.py  
+  Check pair files (img, ann)      
+  <br/>
+- cls_convert.py    
   Convert Class - ex, 0 to 1 
-- ann_merge.py  
-  Merge label contents - ex, detect_1(class person), detect_2(class_ppe)
+- ann_merge.py    
+  Merge label contents - ex, detect_1(class person), detect_2(class_ppe)  
 <br/>
 
 ### Annotation 변환  
