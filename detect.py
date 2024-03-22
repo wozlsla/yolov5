@@ -82,7 +82,7 @@ def insert_data_to_database(frame, lines, dist_rand, node_id="test"):
         box_list.append(box_str)
 
     eqp_time = time.strftime("%Y-%m-%d %H:%M:%S.%03d", time.localtime(time.time()))
-    query = f"INSERT INTO robot_iot.test (node_id, id, class_name, eqp_time, bbox, distance) \
+    query = f"INSERT INTO test.operation (node_id, id, class_name, eqp_time, bbox, distance) \
         VALUES ('{node_id}', %s, %s, '{eqp_time}', ARRAY {box_list}, '{dist_rand}')"
     cur.execute(query, (id, name))
     conn.commit()
@@ -184,7 +184,7 @@ def run(
 
         # Process predictions
         for i, det in enumerate(pred):  # per image
-            query = "SELECT item, status FROM robot_iot.operation WHERE item = 'text' OR item = 'bounding_box' ORDER BY item;"
+            query = "SELECT item, status FROM test.operation WHERE item = 'text' OR item = 'bounding_box' ORDER BY item;"
             cur.execute(query)
             toggle = cur.fetchall()
 
