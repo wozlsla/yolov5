@@ -46,6 +46,8 @@ from utils.metrics import ConfusionMatrix, ap_per_class, box_iou
 from utils.plots import output_to_target, plot_images, plot_val_study
 from utils.torch_utils import select_device, smart_inference_mode
 
+dash = '---------------------------------------------------------------------------------------------------------------------------------------'
+
 
 def save_one_txt(predn, save_conf, shape, file):
     # Save one txt result
@@ -80,14 +82,17 @@ def process_batch(detections, labels, iouv):
         correct (array[N, 10]), for 10 IoU levels
     """
     correct = np.zeros((detections.shape[0], iouv.shape[0])).astype(bool)
-    iou = box_iou(labels[:, 1:], detections[:, :4])
-    correct_class = labels[:, 0:1] == detections[:, 5]
+    iou = box_iou(labels[:, 1:], detections[:, :4]) # traget boxes / GT 와의 IoU
+    # print(f'IoU (GT/label-Predicted) : {iou}')
+    correct_class = labels[:, 0:1] == detections[:, 5] # traget cls / pred cls
     for i in range(len(iouv)):
         x = torch.where((iou >= iouv[i]) & correct_class)  # IoU > threshold and classes match
+        # 일치하는 class 중에서 GT-IoU가 IoT(Threshold)보다 높은 것 - Return Index
         if x[0].shape[0]:
             matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()  # [label, detect, iou]
+            # print(f'Label: {matches[0][0]}, Detect: {matches[0][1]}, IoU: {matches[0][2]}')
+            # https://discuss.pytorch.kr/t/torch-cat-torch-stack/26/2
             if x[0].shape[0] > 1:
-                matches = matches[matches[:, 2].argsort()[::-1]]
                 matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
                 # matches = matches[matches[:, 2].argsort()[::-1]]
                 matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
@@ -188,14 +193,15 @@ def run(
     if isinstance(names, (list, tuple)):  # old format
         names = dict(enumerate(names))
     class_map = coco80_to_coco91_class() if is_coco else list(range(1000))
-    s = ('%22s' + '%11s' * 6) % ('Class', 'Images', 'Instances', 'P', 'R', 'mAP50', 'mAP50-95')
+    # s = ('%22s' + '%11s' * 6) % ('Class', 'Images', 'Instances', 'P', 'R', 'mAP50', 'mAP50-95')
+    s = 'Running'
     tp, fp, p, r, f1, mp, mr, map50, ap50, map = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     dt = Profile(), Profile(), Profile()  # profiling times
     loss = torch.zeros(3, device=device)
     jdict, stats, ap, ap_class = [], [], [], []
-    callbacks.run('on_val_start')
+    # callbacks.run('on_val_start')
     pbar = tqdm(dataloader, desc=s, bar_format=TQDM_BAR_FORMAT)  # progress bar
-    for batch_i, (im, targets, paths, shapes) in enumerate(pbar):
+    for batch_i, (im, targets, paths, shapes) in enumerate(pbar): # per batch
         callbacks.run('on_val_batch_start')
         with dt[0]:
             if cuda:
@@ -206,8 +212,11 @@ def run(
             nb, _, height, width = im.shape  # batch size, channels, height, width
 
         # Inference
-        with dt[1]:
+        with dt[1]: # SxS grid
             preds, train_out = model(im) if compute_loss else (model(im, augment=augment), None)
+            # print(len(preds)) 2
+            # print('predictions - before NMS', preds[0].shape) 
+            # Pred shape : torch.Size([15, 15876, 9]) : data 15, total box, 
 
         # Loss
         if compute_loss:
@@ -215,7 +224,7 @@ def run(
 
         # NMS
         targets[:, 2:] *= torch.tensor((width, height, width, height), device=device)  # to pixels
-        lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
+        lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling # annotation
         with dt[2]:
             preds = non_max_suppression(preds,
                                         conf_thres,
@@ -224,17 +233,20 @@ def run(
                                         multi_label=True,
                                         agnostic=single_cls,
                                         max_det=max_det)
+            # print('predictions - after NMS', pred[0].shape) : pred/columns
 
         # Metrics
-        for si, pred in enumerate(preds):
+        for si, pred in enumerate(preds): # per images
             labels = targets[targets[:, 0] == si, 1:]
             nl, npr = labels.shape[0], pred.shape[0]  # number of labels, predictions
             path, shape = Path(paths[si]), shapes[si][0]
+            # print(path, shape) # img path, path
+            # print(f'number of labels(target): {nl}, predictions: {npr}') # batch process check
             correct = torch.zeros(npr, niou, dtype=torch.bool, device=device)  # init
             seen += 1
 
-            if npr == 0:
-                if nl:
+            if npr == 0: # if there's no prediction
+                if nl: # no detection But, is -> FN
                     stats.append((correct, *torch.zeros((2, 0), device=device), labels[:, 0]))
                     if plots:
                         confusion_matrix.process_batch(detections=None, labels=labels[:, 0])
@@ -251,7 +263,9 @@ def run(
                 tbox = xywh2xyxy(labels[:, 1:5])  # target boxes
                 scale_boxes(im[si].shape[1:], tbox, shape, shapes[si][1])  # native-space labels
                 labelsn = torch.cat((labels[:, 0:1], tbox), 1)  # native-space labels
-                correct = process_batch(predn, labelsn, iouv)
+                correct = process_batch(predn, labelsn, iouv) # TP table
+                # TP table : correct (array[N, 10]), for 10 IoU levels. N : pred
+                # print(f'TP table (pred) : {correct.shape}')
                 if plots:
                     confusion_matrix.process_batch(predn, labelsn)
             stats.append((correct, pred[:, 4], pred[:, 5], labels[:, 0]))  # (correct, conf, pcls, tcls)
@@ -270,16 +284,19 @@ def run(
 
         callbacks.run('on_val_batch_end', batch_i, im, targets, paths, shapes, preds)
 
-    # Compute metrics
+    # Compute metrics # all images
     stats = [torch.cat(x, 0).cpu().numpy() for x in zip(*stats)]  # to numpy
     if len(stats) and stats[0].any():
         tp, fp, p, r, f1, ap, ap_class = ap_per_class(*stats, plot=plots, save_dir=save_dir, names=names)
+        ap_iouvs = ap
         ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
         mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
     nt = np.bincount(stats[3].astype(int), minlength=nc)  # number of targets per class
 
     # Print results
-    pf = '%22s' + '%11i' * 2 + '%11.3g' * 4  # print format
+    LOGGER.info(f'\n\n\n[ Result ]\n{dash}')
+    LOGGER.info(('%9s' + '%11s' * 6) % ('Class', 'Images', 'Instances', 'P', 'R', 'mAP50', 'mAP50-95'))
+    pf = '%9s' + '%11i' * 2 + '%11.3g' * 4  # print format
     LOGGER.info(pf % ('all', seen, nt.sum(), mp, mr, map50, map))
     if nt.sum() == 0:
         LOGGER.warning(f'WARNING ⚠️ no labels found in {task} set, can not compute metrics without labels')
@@ -288,6 +305,33 @@ def run(
     if (verbose or (nc < 50 and not training)) and nc > 1 and len(stats):
         for i, c in enumerate(ap_class):
             LOGGER.info(pf % (names[c], seen, nt[c], p[i], r[i], ap50[i], ap[i]))
+
+    # Print evaluations
+    LOGGER.info(f'\n\n\n[ Evaluation Details ]\n{dash}')
+    iouv_list = [round(value.item(), 2) for value in iouv]
+    pf_ap = '%-12s' + '%-12.5g' * (len(iouv_list))
+    LOGGER.info(f'IoU : {iouv_list} ({len(iouv_list)})\n')  # about this, calc TP -> calc each AP (total 10 ap)
+    LOGGER.info(pf_ap % tuple(['IoU'] + iouv_list))
+    for i, row in enumerate(ap_iouvs):
+        LOGGER.info(pf_ap % tuple([names[ap_class[i]]] + list(row)))  # If there's no detected class, break
+
+    LOGGER.info('\n1. mAP50-90')
+    LOGGER.info('Average Precision of Each Class (detected)')
+    LOGGER.info('Class AP = Sum of AP for each IoU / Number of IoU')
+    tmp = []
+    for i, c in enumerate(ap_class):
+        LOGGER.info(f'{names[c]} = {sum(ap_iouvs[i])}/{len(iouv_list)} = {ap[i]}')
+        tmp.append(ap[i])
+    LOGGER.info(f'(all) mAP = Sum of all classes AP / Number of detected classes = {sum(tmp)}/{len(tmp)} = {sum(tmp)/len(tmp)}')  # map
+ 
+    LOGGER.info('\n2. mAP50 (Standard - Test)')
+    LOGGER.info('Average Precision at IoU 0.5 of Each Class (detected)')
+    tmp = []
+    for i, c in enumerate(ap_class):
+        LOGGER.info(f'{names[c]} : {ap50[i]}')
+        tmp.append(ap50[i])
+    LOGGER.info(f'(all) mAP50 = Sum of all classes ap50 / Number of detected classes = {sum(tmp)}/{len(tmp)} = {sum(tmp)/len(tmp)}')  # map50
+
 
     # Print speeds
     t = tuple(x.t / seen * 1E3 for x in dt)  # speeds per image
@@ -365,7 +409,7 @@ def parse_opt():
     opt.data = check_yaml(opt.data)  # check YAML
     opt.save_json |= opt.data.endswith('coco.yaml')
     opt.save_txt |= opt.save_hybrid
-    print_args(vars(opt))
+    # print_args(vars(opt))
     return opt
 
 
