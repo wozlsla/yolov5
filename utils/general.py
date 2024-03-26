@@ -122,7 +122,17 @@ def is_writeable(dir, test=False):
         return False
 
 
+def set_log_path():
+    from utils.config import Config  # 검증 시험
+    path = Config.path / "../dataset/test/logs/"
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
 LOGGING_NAME = 'yolov5'
+
+s = datetime.now()
+file_name = "%04d-%02d-%02d_%02d:%02d.log" % (s.year, s.month, s.day, s.hour, s.minute)
 
 
 def set_logging(name=LOGGING_NAME, verbose=True):
@@ -139,11 +149,21 @@ def set_logging(name=LOGGING_NAME, verbose=True):
             name: {
                 'class': 'logging.StreamHandler',
                 'formatter': name,
-                'level': level,}},
+                'level': level,
+            },
+            'file': {
+                'class': 'logging.FileHandler',
+                'formatter': name,
+                'level': level,
+                # 'filename': f'./logs/{file_name}',
+                'filename': f'{set_log_path()}/{file_name}',
+            }, # handler 나눠줘야 함
+        },
         'loggers': {
             name: {
-                'level': level,
+                'level': level, # 지정된 level 이상만 실행
                 'handlers': [name],
+                'handlers': [name, 'file'],
                 'propagate': False,}}})
 
 
